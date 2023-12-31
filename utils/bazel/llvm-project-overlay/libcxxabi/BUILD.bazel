@@ -1,0 +1,314 @@
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+)
+
+licenses(["notice"])
+
+
+bool_flag(
+    name = "libcxxabi_enable_new_delete_definitions",
+    build_setting_default = True,
+    #doc = "Build libc++abi with definitions for operator new/delete. These are normally " +
+    #      "defined in libc++abi, but it is also possible to define them in libc++, in " +
+    #      "which case the definition in libc++abi should be turned off.",
+)
+config_setting(
+    name = "libcxxabi_enable_new_delete_definitions_true",
+    flag_values = {":libcxxabi_enable_new_delete_definitions": "True"},
+)
+
+
+bool_flag(
+    name = "libcxxabi_enable_exceptions",
+    build_setting_default = True,
+    #doc = "Provide support for exceptions in the runtime. When disabled, libc++abi does not " +
+    #      "support stack unwinding and other exceptions-related features.",
+)
+config_setting(
+    name = "libcxxabi_enable_exceptions_true",
+    flag_values = {":libcxxabi_enable_exceptions": "True"},
+)
+
+
+bool_flag(
+    name = "libcxxabi_enable_rtti",
+    build_setting_default = True,
+    #doc = "Use runtime type information. This option may only be set to False when libcxxabi_enable_exceptions=False.",
+)
+config_setting(
+    name = "libcxxabi_enable_rtti_true",
+    flag_values = {":libcxxabi_enable_rtti": "True", ":libcxxabi_enable_exceptions": "True",},
+)
+
+
+bool_flag(
+    name = "libcxxabi_enable_threads",
+    build_setting_default = True,
+    #doc = "Build with threads enabled.",
+)
+config_setting(
+    name = "libcxxabi_enable_threads_true",
+    flag_values = {":libcxxabi_enable_threads": "True"},
+)
+
+
+bool_flag(
+    name = "libcxxabi_has_pthread_api",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of pthread API.",
+)
+config_setting(
+    name = "libcxxabi_has_pthread_api_true",
+    flag_values = {
+        ":libcxxabi_has_pthread_api": "True",
+        ":libcxxabi_has_win32_thread_api": "False",
+        ":libcxxabi_has_external_thread_api": "False",
+        ":libcxxabi_enable_threads": "True",
+    },
+)
+
+
+bool_flag(
+    name = "libcxxabi_has_win32_thread_api",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of win32 thread API.",
+)
+config_setting(
+    name = "libcxxabi_has_win32_thread_api_true",
+    flag_values = {
+        ":libcxxabi_has_pthread_api": "False",
+        ":libcxxabi_has_win32_thread_api": "True",
+        ":libcxxabi_has_external_thread_api": "False",
+        ":libcxxabi_enable_threads": "True",
+    },
+)
+
+
+bool_flag(
+    name = "libcxxabi_has_external_thread_api",
+    build_setting_default = False,
+    #doc = "Build libc++abi with an externalized threading API. This option may only be set to True when libcxxabi_enable_threads=True.",
+)
+config_setting(
+    name = "libcxxabi_has_external_thread_api_true",
+    flag_values = {
+        ":libcxxabi_has_pthread_api": "False",
+        ":libcxxabi_has_win32_thread_api": "False",
+        ":libcxxabi_has_external_thread_api": "True",
+        ":libcxxabi_enable_threads": "True",
+    },
+)
+
+
+bool_flag(
+    name = "libcxxabi_use_llvm_unwinder",
+    build_setting_default = False,
+    #doc = "Build and use the LLVM unwinder.",
+)
+config_setting(
+    name = "libcxxabi_use_llvm_unwinder_true",
+    flag_values = {":libcxxabi_use_llvm_unwinder": "True"},
+)
+
+
+# The default terminate handler attempts to demangle uncaught exceptions, which
+# causes extra I/O and demangling code to be pulled in.
+bool_flag(
+    name = "libcxxabi_silent_terminate",
+    build_setting_default = False,
+    #doc = "Set this to make the terminate handler default to a silent alternative.",
+)
+config_setting(
+    name = "libcxxabi_silent_terminate_true",
+    flag_values = {":libcxxabi_silent_terminate": "True"},
+)
+bool_flag(
+    name = "libcxxabi_non_demangling_terminate",
+    build_setting_default = False,
+    #doc = "Set this to make the terminate handler avoid demangling.",
+)
+config_setting(
+    name = "libcxxabi_non_demangling_terminate_true",
+    flag_values = {":libcxxabi_non_demangling_terminate": "True"},
+)
+
+
+bool_flag(
+    name = "libcxxabi_baremetal",
+    build_setting_default = False,
+    #doc = "Build libc++abi for baremetal targets.",
+)
+config_setting(
+    name = "libcxxabi_baremetal_true",
+    flag_values = {":libcxxabi_baremetal": "True"},
+)
+
+
+bool_flag(
+    name = "libcxxabi_enable_forgiving_dynamic_cast",
+    build_setting_default = False,
+    #doc = "Make dynamic_cast more forgiving when type_info's mistakenly have hidden " +
+    #      "visibility, and thus multiple type_infos can exist for a single type. " +
+    #      "When the dynamic_cast would normally fail, this option will cause the " +
+    #      "library to try comparing the type_info names to see if they are equal " +
+    #      "instead.",
+)
+config_setting(
+    name = "libcxxabi_enable_forgiving_dynamic_cast_true",
+    flag_values = {":libcxxabi_enable_forgiving_dynamic_cast": "True"},
+)
+
+
+# Get sources
+LIBCXXABI_COMMON_SOURCES = [
+    # C++ABI files
+    "src/cxa_aux_runtime.cpp",
+    "src/cxa_default_handlers.cpp",
+    "src/cxa_demangle.cpp",
+    "src/cxa_exception_storage.cpp",
+    "src/cxa_guard.cpp",
+    "src/cxa_handlers.cpp",
+    "src/cxa_vector.cpp",
+    "src/cxa_virtual.cpp",
+    # C++ STL files
+    "src/stdlib_exception.cpp",
+    "src/stdlib_stdexcept.cpp",
+    "src/stdlib_typeinfo.cpp",
+    # Internal files
+    "src/abort_message.cpp",
+    "src/fallback_malloc.cpp",
+    "src/private_typeinfo.cpp",
+]
+
+# Selected on libcxxabi_enable_new_delete_definitions
+LIBCXXABI_NEW_DELETE_SOURCES = [
+    "src/stdlib_new_delete.cpp",
+]
+
+
+# Selected on libcxxabi_enable_exceptions
+LIBCXXABI_EXCEPTIONS_SOURCES = [
+    "src/cxa_exception.cpp",
+    "src/cxa_personality.cpp",
+]
+LIBCXXABI_NO_EXCEPTIONS_SOURCES = [
+    "src/cxa_noexception.cpp",
+]
+
+
+LIBCXXABI_HEADERS = [
+    "include/cxxabi.h",
+    "include/__cxxabi_config.h",
+]
+cc_library(
+    name = "cxxabi-headers",
+    srcs = [],
+    hdrs = LIBCXXABI_HEADERS,
+    strip_include_prefix = "include",
+    defines = [
+        # Let the library headers know they are currently being used to build the
+        # library.
+        "_LIBCXXABI_BUILDING_LIBRARY",
+        # libcxxabi needs to, for various reasons, include the libcpp headers as if
+        # it is being built as part of libcxx.
+        "_LIBCPP_BUILDING_LIBRARY",
+        ] +
+        select({
+            ":libcxxabi_enable_threads_true": [],
+            "//conditions:default": ["_LIBCXXABI_HAS_NO_THREADS"]}) +
+        select({
+            ":libcxxabi_has_pthread_api_true": ["_LIBCPP_HAS_THREAD_API_PTHREAD"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxxabi_has_win32_thread_api_true": ["_LIBCPP_HAS_THREAD_API_WIN32"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxxabi_has_external_thread_api_true": ["_LIBCPP_HAS_THREAD_API_EXTERNAL"],
+            "//conditions:default": []}) +
+        select({":libcxxabi_silent_terminate_true": ["LIBCXXABI_SILENT_TERMINATE"],
+                "//conditions:default": []}) +
+        select({":libcxxabi_non_demangling_terminate_true": ["LIBCXXABI_NON_DEMANGLING_TERMINATE"],
+                "//conditions:default": []}) +
+        select({":libcxxabi_baremetal_true": ["LIBCXXABI_BAREMETAL"],
+                "//conditions:default": []}) +
+        select({":libcxxabi_enable_forgiving_dynamic_cast_true": ["_LIBCXXABI_FORGIVING_DYNAMIC_CAST"],
+                "//conditions:default": []}) +
+        select({"@platforms//os:windows": ["_CRT_SECURE_NO_WARNINGS"],
+                "//conditions:default": []}),
+)
+
+
+cc_library(
+    name = "cxxabi-src-headers",
+    srcs = [],
+    hdrs = glob(["src/*.h", "src/*/*.h", "src/*/*.def"]),
+    strip_include_prefix = "src",
+    deps = [
+        # This dependency is only used to get the defines.
+        ":cxxabi-headers",
+    ],
+)
+
+
+# Selected on libcxxabi_enable_threads and not windows or apple.
+cc_library(
+    name = "cxa_thread_atexit",
+    srcs = select({
+        "@platforms//os:windows": [],
+        "@platforms//os:macos": [],
+        "@platforms//os:ios": [],
+        "//conditions:default": ["src/cxa_thread_atexit.cpp"]
+    }),
+    hdrs = [],
+    copts = [
+        "-nostdlib++",
+        "-nostdinc++",
+        "-fvisibility-inlines-hidden",
+    ] +
+    select({":libcxxabi_enable_exceptions_true": [],
+            "//conditions:default": ["-fno-exceptions"]}) +
+    select({":libcxxabi_enable_rtti_true": [],
+            "//conditions:default": ["-fno-rtti"]}),
+    deps = [
+        ":cxxabi-src-headers",
+        ":cxxabi-headers",
+        "//libcxx:cxx-headers",
+    ],
+    local_defines = ["HAVE___CXA_THREAD_ATEXIT_IMPL"],
+)
+
+
+cc_library(
+    name = "cxxabi",
+    srcs = LIBCXXABI_COMMON_SOURCES +
+        select({":libcxxabi_enable_new_delete_definitions_true": LIBCXXABI_NEW_DELETE_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxxabi_enable_exceptions_true": LIBCXXABI_EXCEPTIONS_SOURCES,
+                "//conditions:default": LIBCXXABI_NO_EXCEPTIONS_SOURCES}),
+    hdrs = [],
+    copts = [
+        "-nostdlib++",
+        "-nostdinc++",
+        "-fvisibility-inlines-hidden",
+    ] +
+    select({":libcxxabi_enable_exceptions_true": [],
+            "//conditions:default": ["-fno-exceptions"]}) +
+    select({":libcxxabi_enable_rtti_true": [],
+            "//conditions:default": ["-fno-rtti"]}),
+    deps = [
+        ":cxxabi-headers",
+        ":cxxabi-src-headers",
+        "//libcxx:cxx-headers",
+        "//libcxx:cxx-src-headers",
+    ] +
+    select({":libcxxabi_enable_threads_true": [":cxa_thread_atexit"],
+            "//conditions:default": []}) +
+    select({":libcxxabi_use_llvm_unwinder_true": ["//libunwind:unwind_headers_only"],
+            "//conditions:default": []}),
+)

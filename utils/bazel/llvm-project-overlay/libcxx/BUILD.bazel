@@ -1,0 +1,818 @@
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag", "BuildSettingInfo")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+)
+
+licenses(["notice"])
+
+# TODO ===== MSVC =====
+# Support MSVC (and clang-cl) platforms. The cmake builds have lots of special accommodations
+# for MSVC that this Bazel build file does not have since Bazel support for MSVC is primitive.
+# =====================
+
+bool_flag(
+    name = "libcxx_enable_filesystem",
+    build_setting_default = True,
+    #doc = "Whether to include support for parts of the library that rely on a filesystem " +
+    #      "being available on the platform. This includes things like most parts of " +
+    #      "<filesystem> and others like <fstream>",
+)
+config_setting(
+    name = "libcxx_enable_filesystem_true",
+    flag_values = {":libcxx_enable_filesystem": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_random_device",
+    build_setting_default = True,
+    #doc = "Whether to include support for std::random_device in the library. Disabling " +
+    #      "this can be useful when building the library for platforms that don't have " +
+    #      "a source of randomness, such as some embedded platforms. When this is not " +
+    #      "supported, most of <random> will still be available, but std::random_device " +
+    #      "will not."
+)
+config_setting(
+    name = "libcxx_enable_random_device_true",
+    flag_values = {":libcxx_enable_random_device": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_localization",
+    build_setting_default = True,
+    #doc = "Whether to include support for localization in the library. Disabling " +
+    #      "localization can be useful when porting to platforms that don't support " +
+    #      "the C locale API (e.g. embedded). When localization is not supported, " +
+    #      "several parts of the library will be disabled: <iostream>, <regex>, <locale> " +
+    #      "will be completely unusable, and other parts may be only partly available."
+)
+config_setting(
+    name = "libcxx_enable_localization_true",
+    flag_values = {":libcxx_enable_localization": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_unicode",
+    build_setting_default = True,
+    #doc = "Whether to include support for Unicode in the library. Disabling Unicode can " +
+    #      "be useful when porting to platforms that don't support UTF-8 encoding (e.g. " +
+    #      "embedded)."
+)
+config_setting(
+    name = "libcxx_enable_unicode_true",
+    flag_values = {":libcxx_enable_unicode": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_wide_characters",
+    build_setting_default = True,
+    #doc = "Whether to include support for wide characters in the library. Disabling " +
+    #      "wide character support can be useful when porting to platforms that don't " +
+    #      "support the C functionality for wide characters. When wide characters are " +
+    #      "not supported, several parts of the library will be disabled, notably the " +
+    #      "wide character specializations of std::basic_string."
+)
+config_setting(
+    name = "libcxx_enable_wide_characters_true",
+    flag_values = {":libcxx_enable_wide_characters": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_time_zone_database",
+    build_setting_default = True,
+    #doc = "Whether to include support for time zones in the library. Disabling " +
+    #      "time zone support can be useful when porting to platforms that don't " +
+    #      "ship the IANA time zone database. When time zones are not supported, " +
+    #      "time zone support in <chrono> will be disabled."
+)
+config_setting(
+    name = "libcxx_enable_time_zone_database_true",
+    flag_values = {":libcxx_enable_time_zone_database": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_vendor_availability_annotations",
+    build_setting_default = False,
+    #doc = "Whether to turn on vendor availability annotations on declarations that depend " +
+    #      "on definitions in a shared library. By default, we assume that we're not building " +
+    #      "libc++ for any specific vendor, and we disable those annotations. Vendors wishing " +
+    #      "to provide compile-time errors when using features unavailable on some version of " +
+    #      "the shared library they shipped should turn this on and see `include/__availability` " +
+    #      "for more details."
+)
+config_setting(
+    name = "libcxx_enable_vendor_availability_annotations_true",
+    flag_values = {":libcxx_enable_vendor_availability_annotations": "True"},
+)
+
+
+# TODO MODULES Remove this option and test for the requirements (CMake/Clang) instead.
+bool_flag(
+    name = "libcxx_enable_std_modules",
+    build_setting_default = False,
+    #doc = "Whether to enable the building the C++23 `std` module. This feature is " +
+    #      "experimental and has additional dependencies. Only enable this when " +
+    #      "interested in testing or developing this module. See " +
+    #      "https://libcxx.llvm.org/Modules.html for more information."
+)
+config_setting(
+    name = "libcxx_enable_std_modules_true",
+    flag_values = {":libcxx_enable_std_modules": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_exceptions",
+    build_setting_default = True,
+    #doc = "Use exceptions.",
+)
+config_setting(
+    name = "libcxx_enable_exceptions_true",
+    flag_values = {":libcxx_enable_exceptions": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_rtti",
+    build_setting_default = True,
+    #doc = "Use runtime type information. This option may only be set to False when libcxx_enable_exceptions=False.",
+)
+config_setting(
+    name = "libcxx_enable_rtti_true",
+    flag_values = {":libcxx_enable_rtti": "True", ":libcxx_enable_exceptions": "True",},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_threads",
+    build_setting_default = True,
+    #doc = "Build with threads enabled.",
+)
+config_setting(
+    name = "libcxx_enable_threads_true",
+    flag_values = {":libcxx_enable_threads": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_has_pthread_api",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of pthread API.",
+)
+config_setting(
+    name = "libcxx_has_pthread_api_true",
+    flag_values = {
+        ":libcxx_has_pthread_api": "True",
+        ":libcxx_has_win32_thread_api": "False",
+        ":libcxx_has_external_thread_api": "False",
+        ":libcxx_enable_threads": "True",
+    },
+)
+
+
+bool_flag(
+    name = "libcxx_has_win32_thread_api",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of win32 thread API.",
+)
+config_setting(
+    name = "libcxx_has_win32_thread_api_true",
+    flag_values = {
+        ":libcxx_has_pthread_api": "False",
+        ":libcxx_has_win32_thread_api": "True",
+        ":libcxx_has_external_thread_api": "False",
+        ":libcxx_enable_threads": "True",
+    },
+)
+
+
+bool_flag(
+    name = "libcxx_has_external_thread_api",
+    build_setting_default = False,
+    #doc = "Build libc++ with an externalized threading API. This option may only be set to True when libcxx_enable_threads=True.",
+)
+config_setting(
+    name = "libcxx_has_external_thread_api_true",
+    flag_values = {
+        ":libcxx_has_pthread_api": "False",
+        ":libcxx_has_win32_thread_api": "False",
+        ":libcxx_has_external_thread_api": "True",
+        ":libcxx_enable_threads": "True",
+    },
+)
+
+
+config_setting(
+    name = "libcxx_pstl_cpu_backend_thread",
+    flag_values = {
+        ":libcxx_enable_threads": "True",
+    },
+)
+config_setting(
+    name = "libcxx_pstl_cpu_backend_serial",
+    flag_values = {
+        ":libcxx_enable_threads": "False",
+    },
+)
+
+
+bool_flag(
+    name = "libcxx_enable_monotonic_clock",
+    build_setting_default = True,
+    #doc = "Build libc++ with support for a monotonic clock. This option may only be set to False when libcxx_enable_threads=False.",
+)
+config_setting(
+    name = "libcxx_enable_monotonic_clock_false",
+    flag_values = {
+        ":libcxx_enable_monotonic_clock": "False",
+        ":libcxx_enable_threads": "False",
+    },
+)
+
+
+bool_flag(
+    name = "libcxx_abi_force_itanium",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of the Itanium ABI.",
+)
+config_setting(
+    name = "libcxx_abi_force_itanium_true",
+    flag_values = {":libcxx_abi_force_itanium": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_abi_force_microsoft",
+    build_setting_default = False,
+    #doc = "Ignore auto-detection and force use of the Microsoft ABI.",
+)
+config_setting(
+    name = "libcxx_abi_force_microsoft_true",
+    flag_values = {":libcxx_abi_force_microsoft": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_has_musl_libc",
+    build_setting_default = False,
+    #doc = "Build libc++ with support for the Musl C library.",
+)
+config_setting(
+    name = "libcxx_has_musl_libc_true",
+    flag_values = {":libcxx_has_musl_libc": "True"},
+)
+
+
+bool_flag(
+    name = "libcxx_enable_new_delete_definitions",
+    build_setting_default = False,
+    #doc = "Build libc++ with definitions for operator new/delete. These are normally " +
+    #      "defined in libc++abi, but this option can be used to define them in libc++ " +
+    #      "instead. If you define them in libc++, make sure they are NOT defined in " +
+    #      "libc++abi. Doing otherwise is an ODR violation."
+)
+config_setting(
+    name = "libcxx_enable_new_delete_definitions_true",
+    flag_values = {":libcxx_enable_new_delete_definitions": "True"},
+)
+
+bool_flag(
+    name = "libcxx_use_compiler_rt",
+    build_setting_default = False,
+    #doc = "Use compiler-rt instead of libgcc."
+)
+config_setting(
+    name = "libcxx_use_compiler_rt_true",
+    flag_values = {":libcxx_use_compiler_rt": "True"},
+)
+
+config_setting(
+    name = "libcxx_use_libgcc_s_fs_supplement",
+    flag_values = {
+        ":libcxx_use_compiler_rt": "False",
+        ":libcxx_enable_filesystem": "True",
+    },
+)
+
+
+string_flag(
+    name = "libcxx_hardening_mode",
+    build_setting_default = "none",
+    values = ["none", "fast", "extensive", "debug",],
+    #doc = "Specify the default hardening mode to use. This mode will be used inside the " +
+    #      "compiled library and will be the default when compiling user code. Note that " +
+    #      "users can override this setting in their own code. This does not affect the ABI."
+)
+config_setting(
+    name = "libcxx_hardening_mode_none",
+    flag_values = {":libcxx_hardening_mode": "none"},
+)
+config_setting(
+    name = "libcxx_hardening_mode_fast",
+    flag_values = {":libcxx_hardening_mode": "fast"},
+)
+config_setting(
+    name = "libcxx_hardening_mode_extensive",
+    flag_values = {":libcxx_hardening_mode": "extensive"},
+)
+config_setting(
+    name = "libcxx_hardening_mode_debug",
+    flag_values = {":libcxx_hardening_mode": "debug"},
+)
+
+
+string_flag(
+    name = "libcxx_abi_version",
+    build_setting_default = "1",
+    values = ["1", "2",],
+    #make_variable = "LIBCXX_ABI_VERSION",
+    #doc = "ABI version of libc++. Can be either 1 or 2, where 2 is currently the unstable ABI. " +
+    #      "Defaults to 1 unless LIBCXX_ABI_UNSTABLE is specified, in which case this is 2."
+)
+config_setting(
+    name = "libcxx_abi_version_1",
+    flag_values = {":libcxx_abi_version": "1"},
+)
+config_setting(
+    name = "libcxx_abi_version_2",
+    flag_values = {":libcxx_abi_version": "2"},
+)
+
+
+# TODO Support names other than __1 or __2 when bazel_skylib is updated
+string_flag(
+    name = "libcxx_abi_namespace",
+    build_setting_default = "__1",
+    values = ["__1", "__2",],
+    #make_variable = "LIBCXX_ABI_NAMESPACE",
+    #doc = "The inline ABI namespace used by libc++. It defaults to __n where `n` is the current ABI version."
+)
+config_setting(
+    name = "libcxx_abi_namespace_1",
+    flag_values = {":libcxx_abi_namespace": "__1"},
+)
+config_setting(
+    name = "libcxx_abi_namespace_2",
+    flag_values = {":libcxx_abi_namespace": "__2"},
+)
+
+
+string_flag(
+    name = "libcxx_typeinfo_comparison_implementation",
+    build_setting_default = "default",
+    values = ["default", "1", "2", "3",],
+    #make_variable = "LIBCXX_TYPEINFO_COMPARISON_IMPLEMENTATION",
+    #doc = "Override the implementation to use for comparing typeinfos. By default, this "
+    #      "is detected automatically by the library, but this option allows overriding "
+    #      "which implementation is used unconditionally. "
+    #      "See the documentation in <libcxx/include/typeinfo> for details on what each "
+    #      "value means."
+)
+config_setting(
+    name = "libcxx_typeinfo_comparison_implementation_1",
+    flag_values = {":libcxx_typeinfo_comparison_implementation": "1"},
+)
+config_setting(
+    name = "libcxx_typeinfo_comparison_implementation_2",
+    flag_values = {":libcxx_typeinfo_comparison_implementation": "2"},
+)
+config_setting(
+    name = "libcxx_typeinfo_comparison_implementation_3",
+    flag_values = {":libcxx_typeinfo_comparison_implementation": "3"},
+)
+
+
+# Get sources
+LIBCXX_COMMON_SOURCES = [
+    "src/algorithm.cpp",
+    "src/any.cpp",
+    "src/bind.cpp",
+    "src/call_once.cpp",
+    "src/charconv.cpp",
+    "src/chrono.cpp",
+    "src/error_category.cpp",
+    "src/exception.cpp",
+    "src/filesystem/filesystem_clock.cpp",
+    "src/filesystem/filesystem_error.cpp",
+    "src/filesystem/path_parser.h",
+    "src/filesystem/path.cpp",
+    "src/functional.cpp",
+    "src/hash.cpp",
+    "src/include/apple_availability.h",
+    "src/include/atomic_support.h",
+    "src/include/config_elast.h",
+    "src/include/refstring.h",
+    "src/include/ryu/common.h",
+    "src/include/ryu/d2fixed.h",
+    "src/include/ryu/d2fixed_full_table.h",
+    "src/include/ryu/d2s.h",
+    "src/include/ryu/d2s_full_table.h",
+    "src/include/ryu/d2s_intrinsics.h",
+    "src/include/ryu/digit_table.h",
+    "src/include/ryu/f2s.h",
+    "src/include/ryu/ryu.h",
+    "src/include/to_chars_floating_point.h",
+    "src/legacy_pointer_safety.cpp",
+    "src/memory.cpp",
+    "src/memory_resource.cpp",
+    "src/new_handler.cpp",
+    "src/new_helpers.cpp",
+    "src/optional.cpp",
+    "src/print.cpp",
+    "src/random_shuffle.cpp",
+    "src/ryu/d2fixed.cpp",
+    "src/ryu/d2s.cpp",
+    "src/ryu/f2s.cpp",
+    "src/stdexcept.cpp",
+    "src/string.cpp",
+    "src/support/runtime/exception_fallback.ipp",
+    "src/support/runtime/exception_glibcxx.ipp",
+    "src/support/runtime/exception_libcxxabi.ipp",
+    "src/support/runtime/exception_libcxxrt.ipp",
+    "src/support/runtime/exception_msvc.ipp",
+    "src/support/runtime/exception_pointer_cxxabi.ipp",
+    "src/support/runtime/exception_pointer_glibcxx.ipp",
+    "src/support/runtime/exception_pointer_msvc.ipp",
+    "src/support/runtime/exception_pointer_unimplemented.ipp",
+    "src/support/runtime/stdexcept_default.ipp",
+    "src/support/runtime/stdexcept_vcruntime.ipp",
+    "src/system_error.cpp",
+    "src/typeinfo.cpp",
+    "src/valarray.cpp",
+    "src/variant.cpp",
+    "src/vector.cpp",
+    "src/verbose_abort.cpp",
+]
+
+# Selected on libcxx_enable_threads
+LIBCXX_THREADS_SOURCES = [
+    "src/atomic.cpp",
+    "src/barrier.cpp",
+    "src/condition_variable_destructor.cpp",
+    "src/condition_variable.cpp",
+    "src/future.cpp",
+    "src/mutex_destructor.cpp",
+    "src/mutex.cpp",
+    "src/shared_mutex.cpp",
+    "src/thread.cpp",
+]
+
+
+# Selected on libcxx_enable_random_device
+LIBCXX_RANDOM_DEVICE_SOURCES = [
+    "src/random.cpp",
+]
+
+# Selected on libcxx_enable_localization
+LIBCXX_LOCALIZATION_SOURCES = [
+    "src/include/sso_allocator.h",
+    "src/ios.cpp",
+    "src/ios.instantiations.cpp",
+    "src/iostream.cpp",
+    "src/locale.cpp",
+    "src/ostream.cpp",
+    "src/regex.cpp",
+    "src/strstream.cpp",
+]
+
+
+# Selected on windows
+LIBCXX_WIN32_SOURCES = [
+    "src/support/win32/locale_win32.cpp",
+    "src/support/win32/support.cpp",
+]
+# Selected on libcxx_has_win32_thread_api_true
+LIBCXX_NON_PTHREAD_WIN32_SOURCES = [
+    "src/support/win32/thread_win32.cpp",
+]
+# elseif(ZOS)
+#    LIBCXX_ZOS_SOURCES = [
+#        "src/support/ibm/mbsnrtowcs.cpp",
+#        "src/support/ibm/wcsnrtombs.cpp",
+#        "src/support/ibm/xlocale_zos.cpp",
+#    ]
+
+
+# Selected on libcxx_enable_filesystem
+LIBCXX_FILESYSTEM_SOURCES = [
+    "src/filesystem/directory_entry.cpp",
+    "src/filesystem/directory_iterator.cpp",
+    "src/filesystem/file_descriptor.h",
+    "src/filesystem/operations.cpp",
+    "src/filesystem/posix_compat.h",
+    "src/filesystem/time_utils.h",
+]
+
+# Filesystem uses __int128_t, which requires a definition of __muloi4 when
+# compiled with UBSAN. This definition is not provided by libgcc_s, but is
+# provided by compiler-rt. So we need to disable it to avoid having multiple
+# definitions. See filesystem/int128_builtins.cpp.
+# Selected on libcxx_use_libgcc_s_fs_supplement
+LIBCXX_LIBGCC_S_SUPPLEMENT_SOURCES = [
+    "src/filesystem/int128_builtins.cpp",
+]
+
+
+# Selected on libcxx_enable_new_delete_definitions
+LIBCXX_NEW_DELETE_SOURCES = [
+    "src/new.cpp",
+]
+
+
+
+LIBCXX_PUBLIC_HEADERS = [
+    "include/algorithm",
+    "include/any",
+    "include/array",
+    "include/atomic",
+    "include/barrier",
+    "include/bit",
+    "include/bitset",
+    "include/cassert",
+    "include/ccomplex",
+    "include/cctype",
+    "include/cerrno",
+    "include/cfenv",
+    "include/cfloat",
+    "include/charconv",
+    "include/chrono",
+    "include/cinttypes",
+    "include/ciso646",
+    "include/climits",
+    "include/clocale",
+    "include/cmath",
+    "include/codecvt",
+    "include/compare",
+    "include/complex",
+    "include/concepts",
+    "include/condition_variable",
+    "include/coroutine",
+    "include/csetjmp",
+    "include/csignal",
+    "include/cstdarg",
+    "include/cstdbool",
+    "include/cstddef",
+    "include/cstdint",
+    "include/cstdio",
+    "include/cstdlib",
+    "include/cstring",
+    "include/ctgmath",
+    "include/ctime",
+    "include/cuchar",
+    "include/cwchar",
+    "include/cwctype",
+    "include/deque",
+    "include/exception",
+    "include/execution",
+    "include/expected",
+    "include/experimental/__config",
+    "include/experimental/__memory",
+    "include/experimental/iterator",
+    "include/experimental/memory",
+    "include/experimental/propagate_const",
+    "include/experimental/simd",
+    "include/experimental/type_traits",
+    "include/experimental/utility",
+    "include/ext/__hash",
+    "include/ext/hash_map",
+    "include/ext/hash_set",
+    "include/filesystem",
+    "include/format",
+    "include/forward_list",
+    "include/fstream",
+    "include/functional",
+    "include/future",
+    "include/initializer_list",
+    "include/iomanip",
+    "include/ios",
+    "include/iosfwd",
+    "include/iostream",
+    "include/istream",
+    "include/iterator",
+    "include/latch",
+    "include/libcxx.imp",
+    "include/limits",
+    "include/list",
+    "include/locale",
+    "include/map",
+    "include/mdspan",
+    "include/memory",
+    "include/memory_resource",
+    "include/mutex",
+    "include/new",
+    "include/numbers",
+    "include/numeric",
+    "include/optional",
+    "include/ostream",
+    "include/print",
+    "include/queue",
+    "include/random",
+    "include/ranges",
+    "include/ratio",
+    "include/regex",
+    "include/scoped_allocator",
+    "include/semaphore",
+    "include/set",
+    "include/shared_mutex",
+    "include/source_location",
+    "include/span",
+    "include/sstream",
+    "include/stack",
+    "include/stdexcept",
+    "include/stop_token",
+    "include/streambuf",
+    "include/string",
+    "include/string_view",
+    "include/strstream",
+    "include/syncstream",
+    "include/system_error",
+    "include/thread",
+    "include/tuple",
+    "include/type_traits",
+    "include/typeindex",
+    "include/typeinfo",
+    "include/unordered_map",
+    "include/unordered_set",
+    "include/utility",
+    "include/valarray",
+    "include/variant",
+    "include/vector",
+    "include/version",
+]
+
+write_file(
+    name = "config_site_header",
+    out = "include/__config_site",
+    content = [
+        "#ifndef _LIBCPP___CONFIG_SITE",
+        "#define _LIBCPP___CONFIG_SITE",
+        "#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)",
+        "#define _LIBCPP_INSTRUMENTED_WITH_ASAN",
+        "#endif",
+        "#endif // _LIBCPP___CONFIG_SITE",
+    ],
+    visibility = [":__subpackages__"],
+)
+
+# This is "nothing-to-compile" target with the headers for libcxx.
+# One reason for this is that libcxxabi depends on some libcxx headers.
+# Another reason is as a convenient place to group all defines that configure
+# the compilation of libcxx.
+cc_library(
+    name = "cxx-headers",
+    srcs = [],
+    hdrs = LIBCXX_PUBLIC_HEADERS + glob(["include/**/*.h", "include/*.h", "include/__*", ]) + [":config_site_header"],
+    strip_include_prefix = "include",
+    visibility = [
+        "//libcxxabi:__subpackages__",
+    ],
+    defines =
+        select({
+            ":libcxx_has_pthread_api_true": ["_LIBCPP_HAS_THREAD_API_PTHREAD", "_LIBCPP_LINK_PTHREAD_LIB"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_has_external_thread_api_true": ["_LIBCPP_HAS_THREAD_API_EXTERNAL"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_has_win32_thread_api_true": ["_LIBCPP_HAS_THREAD_API_WIN32"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_enable_threads_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_THREADS"]}) +
+        select({
+            ":libcxx_enable_monotonic_clock_false": ["_LIBCPP_HAS_NO_MONOTONIC_CLOCK"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_enable_filesystem_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_FILESYSTEM"]}) +
+        select({
+            ":libcxx_enable_random_device_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_RANDOM_DEVICE"]}) +
+        select({
+            ":libcxx_enable_localization_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_LOCALIZATION"]}) +
+        select({
+            ":libcxx_enable_unicode_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_UNICODE"]}) +
+        select({
+            ":libcxx_enable_wide_characters_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_WIDE_CHARACTERS"]}) +
+        select({
+            ":libcxx_enable_std_modules_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_STD_MODULES"]}) +
+        select({
+            ":libcxx_enable_time_zone_database_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_TIME_ZONE_DATABASE"]}) +
+        select({
+            ":libcxx_enable_vendor_availability_annotations_true": [],
+            "//conditions:default": ["_LIBCPP_HAS_NO_VENDOR_AVAILABILITY_ANNOTATIONS"]}) +
+        select({
+            ":libcxx_abi_force_itanium_true": ["_LIBCPP_ABI_FORCE_ITANIUM"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_abi_force_microsoft_true": ["_LIBCPP_ABI_FORCE_MICROSOFT"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_has_musl_libc_true": ["_LIBCPP_HAS_MUSL_LIBC"],
+            "//conditions:default": []}) +
+        # PSTL backends
+        select({
+            ":libcxx_pstl_cpu_backend_serial": ["_LIBCPP_PSTL_CPU_BACKEND_SERIAL=1"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_pstl_cpu_backend_thread": ["_LIBCPP_PSTL_CPU_BACKEND_THREAD=1"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_hardening_mode_none": ["_LIBCPP_HARDENING_MODE_DEFAULT=2"],
+            ":libcxx_hardening_mode_fast": ["_LIBCPP_HARDENING_MODE_DEFAULT=4"],
+            ":libcxx_hardening_mode_debug": ["_LIBCPP_HARDENING_MODE_DEFAULT=8"],
+            ":libcxx_hardening_mode_extensive": ["_LIBCPP_HARDENING_MODE_DEFAULT=16"],}) +
+        select({
+            ":libcxx_typeinfo_comparison_implementation_1": ["_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=1"],
+            ":libcxx_typeinfo_comparison_implementation_2": ["_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2"],
+            ":libcxx_typeinfo_comparison_implementation_3": ["_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=3"],
+            "//conditions:default": []}) +
+        select({
+            ":libcxx_abi_version_1": ["_LIBCPP_ABI_VERSION=1"],
+            ":libcxx_abi_version_2": ["_LIBCPP_ABI_VERSION=2"],}) +
+        select({
+            ":libcxx_abi_namespace_1": ["_LIBCPP_ABI_NAMESPACE=__1"],
+            ":libcxx_abi_namespace_2": ["_LIBCPP_ABI_NAMESPACE=__2"],}) +
+        ["_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",],
+)
+
+
+cc_library(
+    name = "cxx-src-headers",
+    srcs = [],
+    hdrs = glob(["src/*.h", "src/*/*.h", "src/*/*/*.h"]),
+    strip_include_prefix = "src",
+    visibility = [
+        "//libcxxabi:__subpackages__",
+    ],
+    deps = [
+        # This dependency is only used to get the defines.
+        ":cxx-headers",
+    ],
+)
+
+
+cc_library(
+    name = "cxx",
+    srcs = LIBCXX_COMMON_SOURCES +
+        select({":libcxx_enable_filesystem_true": LIBCXX_FILESYSTEM_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_enable_localization_true": LIBCXX_LOCALIZATION_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_enable_random_device_true": LIBCXX_RANDOM_DEVICE_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_enable_threads_true": LIBCXX_THREADS_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_has_win32_thread_api_true": LIBCXX_NON_PTHREAD_WIN32_SOURCES,
+                "//conditions:default": []}) +
+        select({"@platforms//os:windows": LIBCXX_WIN32_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_enable_new_delete_definitions_true": LIBCXX_NEW_DELETE_SOURCES,
+                "//conditions:default": []}) +
+        select({":libcxx_use_libgcc_s_fs_supplement": LIBCXX_LIBGCC_S_SUPPLEMENT_SOURCES,
+                "//conditions:default": []}),
+    hdrs = [":config_site_header",],
+    strip_include_prefix = "include",
+    copts = [
+        "-nostdlib++",
+        "-nostdinc++",
+        "-fvisibility-inlines-hidden",
+    ] +
+    select({":libcxx_enable_exceptions_true": [],
+            "//conditions:default": ["-fno-exceptions"]}) +
+    select({":libcxx_enable_rtti_true": [],
+            "//conditions:default": ["-fno-rtti"]}),
+    local_defines = [
+            # Let the library headers know they are currently being used to build the
+            # library.
+            "_LIBCXX_BUILDING_LIBRARY",
+            "_LIBCPP_BUILDING_LIBRARY",
+            "_LIBCPP_REMOVE_TRANSITIVE_INCLUDES",
+        ],
+    deps = [
+        ":cxx-headers",
+        ":cxx-src-headers",
+    ],
+)
+
+
+
+
+
+
