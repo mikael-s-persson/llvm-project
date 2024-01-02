@@ -1,7 +1,7 @@
 # This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag", "BuildSettingInfo")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "bool_setting", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 
 package(
@@ -11,10 +11,33 @@ package(
 
 licenses(["notice"])
 
-# TODO ===== MSVC =====
-# Support MSVC (and clang-cl) platforms. The cmake builds have lots of special accommodations
-# for MSVC that this Bazel build file does not have since Bazel support for MSVC is primitive.
+# ===== MSVC =====
+# Support MSVC via a "not msvc" setting to account for the fact that every other compiler
+# speaks one language and msvc speaks another, so to speak.
+bool_setting(
+    name = "libcxx_fake_setting_always_true",
+    build_setting_default = True,
+    visibility = ["//visibility:private"],
+)
+bool_setting(
+    name = "libcxx_fake_setting_always_false",
+    build_setting_default = False,
+    visibility = ["//visibility:private"],
+)
+
+alias(
+    name = "libcxx_cc_compiler_not_msvc_setting",
+    actual = select({
+        "@bazel_tools//tools/cpp:msvc": ":libcxx_fake_setting_always_false",
+        "//conditions:default": ":libcxx_fake_setting_always_true",
+    }),
+)
+config_setting(
+    name = "libcxx_cc_compiler_not_msvc",
+    flag_values = {":libcxx_cc_compiler_not_msvc_setting": "True"},
+)
 # =====================
+
 
 bool_flag(
     name = "libcxx_enable_filesystem",
@@ -137,9 +160,27 @@ bool_flag(
     build_setting_default = True,
     #doc = "Use exceptions.",
 )
+
 config_setting(
-    name = "libcxx_enable_exceptions_true",
-    flag_values = {":libcxx_enable_exceptions": "True"},
+    name = "libcxx_enable_exceptions_on_msvc",
+    flag_values = {
+        ":libcxx_enable_exceptions": "True",
+        ":libcxx_cc_compiler_not_msvc_setting": "False",
+    },
+)
+config_setting(
+    name = "libcxx_disable_exceptions_on_msvc",
+    flag_values = {
+        ":libcxx_enable_exceptions": "False",
+        ":libcxx_cc_compiler_not_msvc_setting": "False",
+    },
+)
+config_setting(
+    name = "libcxx_disable_exceptions_not_on_msvc",
+    flag_values = {
+        ":libcxx_enable_exceptions": "False",
+        ":libcxx_cc_compiler_not_msvc_setting": "True",
+    },
 )
 
 
@@ -148,9 +189,22 @@ bool_flag(
     build_setting_default = True,
     #doc = "Use runtime type information. This option may only be set to False when libcxx_enable_exceptions=False.",
 )
+
 config_setting(
-    name = "libcxx_enable_rtti_true",
-    flag_values = {":libcxx_enable_rtti": "True", ":libcxx_enable_exceptions": "True",},
+    name = "libcxx_disable_rtti_not_on_msvc",
+    flag_values = {
+        ":libcxx_enable_rtti": "False",
+        ":libcxx_enable_exceptions": "False",
+        ":libcxx_cc_compiler_not_msvc_setting": "True",
+    },
+)
+config_setting(
+    name = "libcxx_disable_rtti_on_msvc",
+    flag_values = {
+        ":libcxx_enable_rtti": "False",
+        ":libcxx_enable_exceptions": "False",
+        ":libcxx_cc_compiler_not_msvc_setting": "False",
+    },
 )
 
 
@@ -768,6 +822,18 @@ cc_library(
 )
 
 
+LIBCXX_BUILDING_LOCAL_DEFINES = [
+    # Let the library headers know they are currently being used to build the
+    # library.
+    "_LIBCXX_BUILDING_LIBRARY",
+    "_LIBCPP_BUILDING_LIBRARY",
+    # Make sure the library can be build without transitive includes. This makes
+    # it easier to upgrade the library to a newer language standard without build
+    # errors.
+    "_LIBCPP_REMOVE_TRANSITIVE_INCLUDES",
+]
+
+
 cc_library(
     name = "cxx",
     srcs = LIBCXX_COMMON_SOURCES +
@@ -789,22 +855,38 @@ cc_library(
                 "//conditions:default": []}),
     hdrs = [":config_site_header",],
     strip_include_prefix = "include",
-    copts = [
-        "-nostdlib++",
-        "-nostdinc++",
-        "-fvisibility-inlines-hidden",
-    ] +
-    select({":libcxx_enable_exceptions_true": [],
-            "//conditions:default": ["-fno-exceptions"]}) +
-    select({":libcxx_enable_rtti_true": [],
-            "//conditions:default": ["-fno-rtti"]}),
-    local_defines = [
-            # Let the library headers know they are currently being used to build the
-            # library.
-            "_LIBCXX_BUILDING_LIBRARY",
-            "_LIBCPP_BUILDING_LIBRARY",
-            "_LIBCPP_REMOVE_TRANSITIVE_INCLUDES",
-        ],
+    copts =
+    select({"@bazel_tools//tools/cpp:msvc": [],
+            # On all systems the system c++ standard library headers need to be excluded.
+            # MSVC only has -X, which disables all default includes; including the crt.
+            # Thus, we do nothing and hope we don't accidentally include any of the C++
+            # headers
+            "//conditions:default": ["-nostdlib++", "-nostdinc++",]}) +
+    select({"@bazel_tools//tools/cpp:msvc": [],
+            # Our visibility annotations are not quite right for non-Clang compilers,
+            # so we end up not exporting all the symbols we should. In the future, we
+            # can improve the situation by providing an explicit list of exported
+            # symbols on all compilers.
+            "@bazel_tools//tools/cpp:clang": ["-fvisibility=hidden"],
+            # Hide all inline function definitions which have not explicitly been marked
+            # visible. This prevents new definitions for inline functions from appearing in
+            # the dylib when get ODR used by another function.
+            "//conditions:default": ["-fvisibility-inlines-hidden",]}) +
+    # When building the dylib, don't warn for unavailable aligned allocation
+    # functions based on the deployment target -- they are always available
+    # because they are provided by the dylib itself with the exception of z/OS.
+    ["-faligned-allocation"] +
+    select({
+            # Catches C++ exceptions only and tells the compiler to assume that extern C
+            # functions never throw a C++ exception.
+            ":libcxx_enable_exceptions_on_msvc": ["-EHsc"],
+            ":libcxx_disable_exceptions_on_msvc": ["-EHs-", "-EHa-",],
+            ":libcxx_disable_exceptions_not_on_msvc": ["-fno-exceptions"],
+            "//conditions:default": [],}) +
+    select({":libcxx_disable_rtti_on_msvc": ["-GR-"],
+            ":libcxx_disable_rtti_not_on_msvc": ["-fno-rtti"],
+            "//conditions:default": [],}),
+    local_defines = LIBCXX_BUILDING_LOCAL_DEFINES,
     deps = [
         ":cxx-headers",
         ":cxx-src-headers",

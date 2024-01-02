@@ -211,14 +211,7 @@ cc_library(
     srcs = [],
     hdrs = LIBCXXABI_HEADERS,
     strip_include_prefix = "include",
-    defines = [
-        # Let the library headers know they are currently being used to build the
-        # library.
-        "_LIBCXXABI_BUILDING_LIBRARY",
-        # libcxxabi needs to, for various reasons, include the libcpp headers as if
-        # it is being built as part of libcxx.
-        "_LIBCPP_BUILDING_LIBRARY",
-        ] +
+    defines = 
         select({
             ":libcxxabi_enable_threads_true": [],
             "//conditions:default": ["_LIBCXXABI_HAS_NO_THREADS"]}) +
@@ -256,6 +249,16 @@ cc_library(
 )
 
 
+LIBCXXABI_BUILDING_LOCAL_DEFINES = [
+    # Let the library headers know they are currently being used to build the
+    # library.
+    "_LIBCXXABI_BUILDING_LIBRARY",
+    # libcxxabi needs to, for various reasons, include the libcpp headers as if
+    # it is being built as part of libcxx.
+    "_LIBCPP_BUILDING_LIBRARY",
+]
+
+
 # Selected on libcxxabi_enable_threads and not windows or apple.
 cc_library(
     name = "cxa_thread_atexit",
@@ -280,7 +283,7 @@ cc_library(
         ":cxxabi-headers",
         "//libcxx:cxx-headers",
     ],
-    local_defines = ["HAVE___CXA_THREAD_ATEXIT_IMPL"],
+    local_defines = ["HAVE___CXA_THREAD_ATEXIT_IMPL"] + LIBCXXABI_BUILDING_LOCAL_DEFINES,
 )
 
 
@@ -311,4 +314,5 @@ cc_library(
             "//conditions:default": []}) +
     select({":libcxxabi_use_llvm_unwinder_true": ["//libunwind:unwind_headers_only"],
             "//conditions:default": []}),
+    local_defines = LIBCXXABI_BUILDING_LOCAL_DEFINES,
 )
