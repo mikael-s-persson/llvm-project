@@ -30,9 +30,9 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/CodeGenTypes/MachineValueType.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Instruction.h"
@@ -558,6 +558,7 @@ BEGIN_TWO_BYTE_PACK()
 
   class LoadSDNodeBitfields {
     friend class LoadSDNode;
+    friend class AtomicSDNode;
     friend class VPLoadSDNode;
     friend class VPStridedLoadSDNode;
     friend class MaskedLoadSDNode;
@@ -698,6 +699,8 @@ public:
         return false;
       case ISD::STRICT_FP16_TO_FP:
       case ISD::STRICT_FP_TO_FP16:
+      case ISD::STRICT_BF16_TO_FP:
+      case ISD::STRICT_FP_TO_BF16:
 #define DAG_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)               \
       case ISD::STRICT_##DAGN:
 #include "llvm/IR/ConstrainedOps.def"
@@ -929,8 +932,14 @@ public:
   /// Helper method returns the integer value of a ConstantSDNode operand.
   inline uint64_t getConstantOperandVal(unsigned Num) const;
 
+  /// Helper method returns the zero-extended integer value of a ConstantSDNode.
+  inline uint64_t getAsZExtVal() const;
+
   /// Helper method returns the APInt of a ConstantSDNode operand.
   inline const APInt &getConstantOperandAPInt(unsigned Num) const;
+
+  /// Helper method returns the APInt value of a ConstantSDNode.
+  inline const APInt &getAsAPIntVal() const;
 
   const SDValue &getOperand(unsigned Num) const {
     assert(Num < NumOperands && "Invalid child # of SDNode!");
@@ -1467,6 +1476,16 @@ public:
             MMO->isAtomic()) && "then why are we using an AtomicSDNode?");
   }
 
+  void setExtensionType(ISD::LoadExtType ETy) {
+    assert(getOpcode() == ISD::ATOMIC_LOAD && "Only used for atomic loads.");
+    LoadSDNodeBits.ExtTy = ETy;
+  }
+
+  ISD::LoadExtType getExtensionType() const {
+    assert(getOpcode() == ISD::ATOMIC_LOAD && "Only used for atomic loads.");
+    return static_cast<ISD::LoadExtType>(LoadSDNodeBits.ExtTy);
+  }
+
   const SDValue &getBasePtr() const {
     return getOpcode() == ISD::ATOMIC_STORE ? getOperand(2) : getOperand(1);
   }
@@ -1645,8 +1664,16 @@ uint64_t SDNode::getConstantOperandVal(unsigned Num) const {
   return cast<ConstantSDNode>(getOperand(Num))->getZExtValue();
 }
 
+uint64_t SDNode::getAsZExtVal() const {
+  return cast<ConstantSDNode>(this)->getZExtValue();
+}
+
 const APInt &SDNode::getConstantOperandAPInt(unsigned Num) const {
   return cast<ConstantSDNode>(getOperand(Num))->getAPIntValue();
+}
+
+const APInt &SDNode::getAsAPIntVal() const {
+  return cast<ConstantSDNode>(this)->getAPIntValue();
 }
 
 class ConstantFPSDNode : public SDNode {
