@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "bool_setting", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -13,7 +14,7 @@ licenses(["notice"])
 
 # ===== MSVC =====
 # Support MSVC via a "not msvc" setting to account for the fact that every other compiler
-# speaks one language and msvc speaks another, so to speak.
+# speaks one language and msvc speaks another.
 bool_setting(
     name = "libcxx_fake_setting_always_true",
     build_setting_default = True,
@@ -359,6 +360,17 @@ config_setting(
     },
 )
 
+# TODO Not sure how to allow a build flag to bring in an additional file.
+exports_files(["vendor/llvm/default_assertion_handler.in",])
+label_flag(
+    name = "libcxx_assertion_handler_file",
+    build_setting_default = "vendor/llvm/default_assertion_handler.in",
+    #doc = "Specify the path to a header that contains a custom implementation of the " +
+    #      "assertion handler that gets invoked when a hardening assertion fails. If " +
+    #      "provided, this header will be included by the library, replacing the " +
+    #      "default assertion handler."
+)
+
 
 string_flag(
     name = "libcxx_hardening_mode",
@@ -584,7 +596,6 @@ LIBCXX_NEW_DELETE_SOURCES = [
 ]
 
 
-
 LIBCXX_PUBLIC_HEADERS = [
     "include/algorithm",
     "include/any",
@@ -631,7 +642,6 @@ LIBCXX_PUBLIC_HEADERS = [
     "include/execution",
     "include/expected",
     "include/experimental/__config",
-    "include/experimental/__memory",
     "include/experimental/iterator",
     "include/experimental/memory",
     "include/experimental/propagate_const",
@@ -719,14 +729,20 @@ write_file(
     visibility = [":__subpackages__"],
 )
 
-# This is "nothing-to-compile" target with the headers for libcxx.
-# One reason for this is that libcxxabi depends on some libcxx headers.
-# Another reason is as a convenient place to group all defines that configure
-# the compilation of libcxx.
+copy_file(
+    name = "assertion_handler_header",
+    src = ":libcxx_assertion_handler_file",
+    out = "include/__assertion_handler",
+)
+
+# This is a "nothing-to-compile" target with the headers for libcxx.
+# The reason for this is that libcxxabi depends on some libcxx headers.
+# Another reason is as a common target where we have all defines that configure
+# the compilation of libcxx and libcxxabi
 cc_library(
     name = "cxx-headers",
     srcs = [],
-    hdrs = LIBCXX_PUBLIC_HEADERS + glob(["include/**/*.h", "include/*.h", "include/__*", ]) + [":config_site_header"],
+    hdrs = LIBCXX_PUBLIC_HEADERS + glob(["include/**/*.h", "include/*.h", "include/__*", ]) + [":config_site_header"] + [":assertion_handler_header"],
     strip_include_prefix = "include",
     visibility = [
         "//libcxxabi:__subpackages__",
@@ -803,7 +819,7 @@ cc_library(
         select({
             ":libcxx_abi_namespace_1": ["_LIBCPP_ABI_NAMESPACE=__1"],
             ":libcxx_abi_namespace_2": ["_LIBCPP_ABI_NAMESPACE=__2"],}) +
-        ["_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",],
+        ["_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS", "_LIBCPP_REMOVE_TRANSITIVE_INCLUDES", ],
 )
 
 
@@ -856,12 +872,14 @@ cc_library(
     hdrs = [":config_site_header",],
     strip_include_prefix = "include",
     copts =
+     # Use C++23 for all targets. See libcxx/CMakeLists.txt.
+    ["-std=c++23"] +
     select({"@bazel_tools//tools/cpp:msvc": [],
             # On all systems the system c++ standard library headers need to be excluded.
             # MSVC only has -X, which disables all default includes; including the crt.
             # Thus, we do nothing and hope we don't accidentally include any of the C++
             # headers
-            "//conditions:default": ["-nostdlib++", "-nostdinc++",]}) +
+            "//conditions:default": ["-nostdlib++", "-nostdinc++", ]}) +
     select({"@bazel_tools//tools/cpp:msvc": [],
             # Our visibility annotations are not quite right for non-Clang compilers,
             # so we end up not exporting all the symbols we should. In the future, we
@@ -885,6 +903,12 @@ cc_library(
             "//conditions:default": [],}) +
     select({":libcxx_disable_rtti_on_msvc": ["-GR-"],
             ":libcxx_disable_rtti_not_on_msvc": ["-fno-rtti"],
+            "//conditions:default": [],}) +
+    # Modules flags ===============================================================
+    # FIXME The libc++ sources are fundamentally non-modular. They need special
+    # versions of the headers in order to provide C++03 and legacy ABI definitions.
+    # NOTE: The public headers can be used with modules in all other contexts.
+    select({":libcxx_enable_std_modules_true": ["-Wno-unused-command-line-argument", "-fno-modules"],
             "//conditions:default": [],}),
     local_defines = LIBCXX_BUILDING_LOCAL_DEFINES,
     deps = [

@@ -20,7 +20,10 @@ bool_flag(
 )
 config_setting(
     name = "libcxxabi_enable_new_delete_definitions_true",
-    flag_values = {":libcxxabi_enable_new_delete_definitions": "True"},
+    flag_values = {
+        ":libcxxabi_enable_new_delete_definitions": "True",
+        "//libcxx:libcxx_enable_new_delete_definitions": "False",
+    },
 )
 
 
@@ -42,8 +45,11 @@ bool_flag(
     #doc = "Use runtime type information. This option may only be set to False when libcxxabi_enable_exceptions=False.",
 )
 config_setting(
-    name = "libcxxabi_enable_rtti_true",
-    flag_values = {":libcxxabi_enable_rtti": "True", ":libcxxabi_enable_exceptions": "True",},
+    name = "libcxxabi_enable_rtti_false",
+    flag_values = {
+        ":libcxxabi_enable_rtti": "False",
+        ":libcxxabi_enable_exceptions": "False",
+    },
 )
 
 
@@ -54,7 +60,10 @@ bool_flag(
 )
 config_setting(
     name = "libcxxabi_enable_threads_true",
-    flag_values = {":libcxxabi_enable_threads": "True"},
+    flag_values = {
+        ":libcxxabi_enable_threads": "True",
+        "//libcxx:libcxx_enable_threads": "True",
+    },
 )
 
 
@@ -70,6 +79,7 @@ config_setting(
         ":libcxxabi_has_win32_thread_api": "False",
         ":libcxxabi_has_external_thread_api": "False",
         ":libcxxabi_enable_threads": "True",
+        "//libcxx:libcxx_enable_threads": "True",
     },
 )
 
@@ -86,6 +96,7 @@ config_setting(
         ":libcxxabi_has_win32_thread_api": "True",
         ":libcxxabi_has_external_thread_api": "False",
         ":libcxxabi_enable_threads": "True",
+        "//libcxx:libcxx_enable_threads": "True",
     },
 )
 
@@ -102,6 +113,7 @@ config_setting(
         ":libcxxabi_has_win32_thread_api": "False",
         ":libcxxabi_has_external_thread_api": "True",
         ":libcxxabi_enable_threads": "True",
+        "//libcxx:libcxx_enable_threads": "True",
     },
 )
 
@@ -183,7 +195,6 @@ LIBCXXABI_COMMON_SOURCES = [
     # Internal files
     "src/abort_message.cpp",
     "src/fallback_malloc.cpp",
-    "src/private_typeinfo.cpp",
 ]
 
 # Selected on libcxxabi_enable_new_delete_definitions
@@ -199,6 +210,11 @@ LIBCXXABI_EXCEPTIONS_SOURCES = [
 ]
 LIBCXXABI_NO_EXCEPTIONS_SOURCES = [
     "src/cxa_noexception.cpp",
+]
+
+# Selected on libcxxabi_enable_rtti
+LIBCXXABI_RTTI_SOURCES = [
+    "src/private_typeinfo.cpp",
 ]
 
 
@@ -276,8 +292,8 @@ cc_library(
     ] +
     select({":libcxxabi_enable_exceptions_true": [],
             "//conditions:default": ["-fno-exceptions"]}) +
-    select({":libcxxabi_enable_rtti_true": [],
-            "//conditions:default": ["-fno-rtti"]}),
+    select({":libcxxabi_enable_rtti_false": ["-fno-rtti"],
+            "//conditions:default": []}),
     deps = [
         ":cxxabi-src-headers",
         ":cxxabi-headers",
@@ -293,17 +309,27 @@ cc_library(
         select({":libcxxabi_enable_new_delete_definitions_true": LIBCXXABI_NEW_DELETE_SOURCES,
                 "//conditions:default": []}) +
         select({":libcxxabi_enable_exceptions_true": LIBCXXABI_EXCEPTIONS_SOURCES,
-                "//conditions:default": LIBCXXABI_NO_EXCEPTIONS_SOURCES}),
+                "//conditions:default": LIBCXXABI_NO_EXCEPTIONS_SOURCES}) +
+        select({":libcxxabi_enable_rtti_false": [],
+                "//conditions:default": LIBCXXABI_RTTI_SOURCES}),
     hdrs = [],
     copts = [
         "-nostdlib++",
         "-nostdinc++",
         "-fvisibility-inlines-hidden",
     ] +
+     # Use C++23 for all targets. See libcxx/CMakeLists.txt.
+    ["-std=c++23"] +
     select({":libcxxabi_enable_exceptions_true": [],
             "//conditions:default": ["-fno-exceptions"]}) +
-    select({":libcxxabi_enable_rtti_true": [],
-            "//conditions:default": ["-fno-rtti"]}),
+    select({":libcxxabi_enable_rtti_false": ["-fno-rtti"],
+            "//conditions:default": []}) +
+    # Modules flags ===============================================================
+    # FIXME The libc++ sources are fundamentally non-modular. They need special
+    # versions of the headers in order to provide C++03 and legacy ABI definitions.
+    # NOTE: The public headers can be used with modules in all other contexts.
+    select({"//libcxx:libcxx_enable_std_modules_true": ["-Wno-unused-command-line-argument", "-fno-modules"],
+            "//conditions:default": [],}),
     deps = [
         ":cxxabi-headers",
         ":cxxabi-src-headers",
